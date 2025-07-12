@@ -40,6 +40,9 @@ contract BrokexStorage {
         uint256 slBucketId;
         uint256 tpBucketId;
         uint256 liqBucketId;
+        uint256 stopLossPrice;      // prix du stop-loss
+        uint256 takeProfitPrice;    // prix du take-profit
+        uint256 liquidationPrice;   // prix de liquidation
     }
 
     struct Order {
@@ -102,7 +105,10 @@ contract BrokexStorage {
         uint256 sizeUsd,
         uint256 slBucketId,
         uint256 tpBucketId,
-        uint256 liqBucketId
+        uint256 liqBucketId,
+        uint256 stopLossPrice,
+        uint256 takeProfitPrice,
+        uint256 liquidationPrice
     ) external onlyCore returns (uint256 openId) {
         openId = nextOpenId++;
         opens[openId] = Open(
@@ -116,7 +122,10 @@ contract BrokexStorage {
             block.timestamp,
             slBucketId,
             tpBucketId,
-            liqBucketId
+            liqBucketId,
+            stopLossPrice,
+            takeProfitPrice,
+            liquidationPrice
         );
         userOpenIds[trader].push(openId);
         emit OpenStored(trader, openId);
@@ -303,13 +312,18 @@ contract BrokexStorage {
     function getUserCloseds(address user) external view returns (Closed[] memory) {
         return userCloseds[user];
     }
-
-    function getUserPnLHistory(address user) external view returns (int256[] memory) {
-        Closed[] storage arr = userCloseds[user];
-        int256[] memory pnlList = new int256[](arr.length);
-        for (uint256 i = 0; i < arr.length; i++) {
-            pnlList[i] = arr[i].pnl;
+    function getUserClosedIds(address user) external view returns (uint256[] memory) {
+        uint256 len = userCloseds[user].length;
+        uint256[] memory ids = new uint256[](len);
+        for (uint256 i = 0; i < len; i++) {
+            ids[i] = i;
         }
-        return pnlList;
+        return ids;
     }
+    function getClosedById(address user, uint256 index) external view returns (Closed memory) {
+        require(index < userCloseds[user].length, "Invalid index");
+        return userCloseds[user][index];
+    }
+
+
 }

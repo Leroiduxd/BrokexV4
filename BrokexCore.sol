@@ -43,6 +43,9 @@ interface IBrokexStorage {
         uint256 slBucketId;
         uint256 tpBucketId;
         uint256 liqBucketId;
+        uint256 stopLossPrice;      // prix du stop-loss
+        uint256 takeProfitPrice;    // prix du take-profit
+        uint256 liquidationPrice;   // prix de liquidation
     }
 
     struct Order {
@@ -85,7 +88,10 @@ interface IBrokexStorage {
         uint256 sizeUsd,
         uint256 slBucketId,
         uint256 tpBucketId,
-        uint256 liqBucketId
+        uint256 liqBucketId,
+        uint256 stopLossPrice,
+        uint256 takeProfitPrice,
+        uint256 liquidationPrice
     ) external returns (uint256 openId);
 
     function storeOrder(
@@ -132,7 +138,7 @@ interface IBrokexStorage {
         int256 pnl
     ) external;
 
-    function getOpenById(uint256 id) external view returns (Open memory);
+function getOpenById(uint256 id) external view returns (IBrokexStorage.Open memory);
 
     function getOrderById(uint256 id) external view returns (Order memory);
 
@@ -144,6 +150,18 @@ interface IBrokexStorage {
     function getUserOpenIds(address user) external view returns (uint256[] memory);
     function getUserOrderIds(address user) external view returns (uint256[] memory);
     function getUserCloseds(address user) external view returns (Closed[] memory);
+    function getUserClosedIds(address user) external view returns (uint256[] memory);
+    function getClosedById(address user, uint256 index) external view returns (
+        uint256 assetIndex,
+        bool isLong,
+        uint256 leverage,
+        uint256 openPrice,
+        uint256 closePrice,
+        uint256 sizeUsd,
+        uint256 openTimestamp,
+        uint256 closeTimestamp,
+        int256 pnl
+    );
     
 }
 
@@ -247,12 +265,26 @@ contract BrokexCore is Ownable {
         uint256 tpId = tpPrice > 0 ? tpPrice / asset.bucketSize : 0;
         uint256 liqId = liqP / asset.bucketSize;
 
-        openId = brokexStorage.storeOpen(msg.sender, idx, isLong, lev, price, sizeUsd, slId, tpId, liqId);
+        openId = brokexStorage.storeOpen(
+            msg.sender,
+            idx,
+            isLong,
+            lev,
+            price,
+            sizeUsd,
+            slId,
+            tpId,
+            liqId,
+            slPrice,
+            tpPrice,
+            liqP
+        );
 
         if (slPrice > 0) brokexStorage.addToBucket(0, idx, slId, openId, slPrice);
         if (tpPrice > 0) brokexStorage.addToBucket(0, idx, tpId, openId, tpPrice);
         brokexStorage.addToBucket(2, idx, liqId, openId, liqP);
     }
+
 
 
     function closePosition(uint256 openId, bytes calldata proof) external {
@@ -556,6 +588,36 @@ function getUserOrderIds(address user) external view returns (uint256[] memory) 
 function getUserCloseds(address user) external view returns (IBrokexStorage.Closed[] memory) {
     return brokexStorage.getUserCloseds(user);
 }
+function getUserClosedIds(address user) external view returns (uint256[] memory) {
+    return brokexStorage.getUserClosedIds(user);
+}
+
+function getClosedById(address user, uint256 index) external view returns (IBrokexStorage.Closed memory) {
+    (
+        uint256 assetIndex,
+        bool isLong,
+        uint256 leverage,
+        uint256 openPrice,
+        uint256 closePrice,
+        uint256 sizeUsd,
+        uint256 openTimestamp,
+        uint256 closeTimestamp,
+        int256 pnl
+    ) = brokexStorage.getClosedById(user, index);
+
+    return IBrokexStorage.Closed({
+        assetIndex: assetIndex,
+        isLong: isLong,
+        leverage: leverage,
+        openPrice: openPrice,
+        closePrice: closePrice,
+        sizeUsd: sizeUsd,
+        openTimestamp: openTimestamp,
+        closeTimestamp: closeTimestamp,
+        pnl: pnl
+    });
+}
+
 
 function executeOrders(bytes calldata proof) external onlyExecutor {
     ISupraOraclePull.PriceData memory pd = supraOracle.verifyOracleProof(proof);
@@ -584,7 +646,6 @@ function executeOrders(bytes calldata proof) external onlyExecutor {
                     uint256 tpId = o.takeProfit > 0 ? o.takeProfit / asset.bucketSize : 0;
                     uint256 liqId = liqP / asset.bucketSize;
 
-                    // ⚠️ ON UTILISE o.trader ICI, PAS msg.sender
                     uint256 openId = brokexStorage.storeOpen(
                         o.trader,
                         o.assetIndex,
@@ -594,17 +655,18 @@ function executeOrders(bytes calldata proof) external onlyExecutor {
                         o.sizeUsd,
                         slId,
                         tpId,
-                        liqId
+                        liqId,
+                        o.stopLoss,
+                        o.takeProfit,
+                        liqP
                     );
 
                     if (o.stopLoss > 0)
                         brokexStorage.addToBucket(0, o.assetIndex, slId, openId, o.stopLoss);
                     if (o.takeProfit > 0)
                         brokexStorage.addToBucket(0, o.assetIndex, tpId, openId, o.takeProfit);
-
                     brokexStorage.addToBucket(2, o.assetIndex, liqId, openId, liqP);
 
-                    // ⚠️ Ne pas oublier d’utiliser l’adresse du trader
                     brokexStorage.removeOrder(o.trader, o.id);
                     brokexStorage.removeFromBucket(1, o.assetIndex, o.limitBucketId, o.id);
                 }
@@ -612,28 +674,7 @@ function executeOrders(bytes calldata proof) external onlyExecutor {
         }
     }
 }
-function getAllListedAssetsInfo() external view returns (uint256[] memory assetIndexes, uint256[] memory bucketSizes) {
-    uint256 maxAssets = 256;
-    uint256[] memory tempIndexes = new uint256[](maxAssets);
-    uint256[] memory tempBuckets = new uint256[](maxAssets);
-    uint256 count = 0;
 
-    for (uint256 i = 0; i < maxAssets; i++) {
-        if (_isAssetListed[i]) {
-            tempIndexes[count] = i;
-            tempBuckets[count] = _assets[i].bucketSize;
-            count++;
-        }
-    }
-
-    // Resize proprement les tableaux
-    assetIndexes = new uint256[](count);
-    bucketSizes = new uint256[](count);
-    for (uint256 j = 0; j < count; j++) {
-        assetIndexes[j] = tempIndexes[j];
-        bucketSizes[j] = tempBuckets[j];
-    }
-}
 
 
 
