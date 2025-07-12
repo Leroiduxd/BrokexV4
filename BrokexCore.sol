@@ -138,7 +138,7 @@ interface IBrokexStorage {
         int256 pnl
     ) external;
 
-function getOpenById(uint256 id) external view returns (IBrokexStorage.Open memory);
+    function getOpenById(uint256 id) external view returns (IBrokexStorage.Open memory);
 
     function getOrderById(uint256 id) external view returns (Order memory);
 
@@ -150,18 +150,7 @@ function getOpenById(uint256 id) external view returns (IBrokexStorage.Open memo
     function getUserOpenIds(address user) external view returns (uint256[] memory);
     function getUserOrderIds(address user) external view returns (uint256[] memory);
     function getUserCloseds(address user) external view returns (Closed[] memory);
-    function getUserClosedIds(address user) external view returns (uint256[] memory);
-    function getClosedById(address user, uint256 index) external view returns (
-        uint256 assetIndex,
-        bool isLong,
-        uint256 leverage,
-        uint256 openPrice,
-        uint256 closePrice,
-        uint256 sizeUsd,
-        uint256 openTimestamp,
-        uint256 closeTimestamp,
-        int256 pnl
-    );
+
     
 }
 
@@ -294,7 +283,7 @@ contract BrokexCore is Ownable {
         require(op.trader == msg.sender, "Not position owner");
 
         ISupraOraclePull.PriceData memory pd = supraOracle.verifyOracleProof(proof);
-        uint256 closePrice;
+        uint256 closePrice = 0;
         for (uint i = 0; i < pd.pairs.length; i++) {
             if (pd.pairs[i] == op.assetIndex) {
                 closePrice = pd.prices[i];
@@ -303,11 +292,13 @@ contract BrokexCore is Ownable {
         }
         require(closePrice > 0, "PX");
 
-        int256 pnl = op.isLong
-            ? int256((closePrice - op.openPrice) * op.sizeUsd * op.leverage / op.openPrice)
-            : int256((op.openPrice - closePrice) * op.sizeUsd * op.leverage / op.openPrice);
+        int256 priceDiff = int256(closePrice) - int256(op.openPrice);
+        int256 pnl = priceDiff * int256(op.sizeUsd) * int256(op.leverage) / int256(op.openPrice);
 
-        uint256 closeMargin = pnl >= 0 ? op.sizeUsd + uint256(pnl) : op.sizeUsd - uint256(-pnl);
+        uint256 closeMargin = pnl >= 0
+            ? op.sizeUsd + uint256(pnl)
+            : op.sizeUsd - uint256(-pnl);
+
         brokexVault.settleMargin(msg.sender, op.sizeUsd, closeMargin);
 
         brokexStorage.removeOpen(msg.sender, openId);
@@ -328,6 +319,7 @@ contract BrokexCore is Ownable {
             pnl
         );
     }
+
 
 
     function placeOrder(
@@ -587,35 +579,6 @@ function getUserOrderIds(address user) external view returns (uint256[] memory) 
 
 function getUserCloseds(address user) external view returns (IBrokexStorage.Closed[] memory) {
     return brokexStorage.getUserCloseds(user);
-}
-function getUserClosedIds(address user) external view returns (uint256[] memory) {
-    return brokexStorage.getUserClosedIds(user);
-}
-
-function getClosedById(address user, uint256 index) external view returns (IBrokexStorage.Closed memory) {
-    (
-        uint256 assetIndex,
-        bool isLong,
-        uint256 leverage,
-        uint256 openPrice,
-        uint256 closePrice,
-        uint256 sizeUsd,
-        uint256 openTimestamp,
-        uint256 closeTimestamp,
-        int256 pnl
-    ) = brokexStorage.getClosedById(user, index);
-
-    return IBrokexStorage.Closed({
-        assetIndex: assetIndex,
-        isLong: isLong,
-        leverage: leverage,
-        openPrice: openPrice,
-        closePrice: closePrice,
-        sizeUsd: sizeUsd,
-        openTimestamp: openTimestamp,
-        closeTimestamp: closeTimestamp,
-        pnl: pnl
-    });
 }
 
 

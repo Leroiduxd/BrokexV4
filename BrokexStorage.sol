@@ -89,6 +89,8 @@ contract BrokexStorage {
     mapping(uint256 => mapping(uint256 => BucketEntry[])) public limitBuckets;
     mapping(uint256 => mapping(uint256 => BucketEntry[])) public liquidationBuckets;
 
+
+
     event OpenStored(address indexed user, uint256 indexed openId);
     event OrderStored(address indexed user, uint256 indexed orderId);
     event ClosedStored(address indexed user, uint256 assetIndex, uint256 closeTimestamp, int256 pnl);
@@ -187,6 +189,7 @@ contract BrokexStorage {
         );
         emit ClosedStored(trader, assetIndex, closeTimestamp, pnl);
     }
+
 
     function removeOpen(address trader, uint256 openId) external onlyCore {
         uint256[] storage arr = userOpenIds[trader];
@@ -312,18 +315,7 @@ contract BrokexStorage {
     function getUserCloseds(address user) external view returns (Closed[] memory) {
         return userCloseds[user];
     }
-    function getUserClosedIds(address user) external view returns (uint256[] memory) {
-        uint256 len = userCloseds[user].length;
-        uint256[] memory ids = new uint256[](len);
-        for (uint256 i = 0; i < len; i++) {
-            ids[i] = i;
-        }
-        return ids;
-    }
-    function getClosedById(address user, uint256 index) external view returns (Closed memory) {
-        require(index < userCloseds[user].length, "Invalid index");
-        return userCloseds[user][index];
-    }
+
 
 
 }
